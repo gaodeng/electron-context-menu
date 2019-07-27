@@ -36,9 +36,21 @@ const create = (win, options) => {
 
 		const {editFlags} = props;
 		const hasText = props.selectionText.trim().length > 0;
+		const isLink = Boolean(props.linkURL);
 		const can = type => editFlags[`can${type}`] && hasText;
 
 		const defaultActions = {
+			separator: () => ({type: 'separator'}),
+			lookUpSelection: decorateMenuItem({
+				id: 'lookUpSelection',
+				label: 'Look Up “{selection}”',
+				visible: process.platform === 'darwin' && hasText && !isLink,
+				click() {
+					if (process.platform === 'darwin') {
+						webContents(win).showDefinitionForSelection();
+					}
+				}
+			}),
 			cut: decorateMenuItem({
 				id: 'cut',
 				label: 'Cut',
@@ -71,19 +83,6 @@ const create = (win, options) => {
 					webContents(win).insertText(clipboardContent);
 				}
 			}),
-			inspect: () => ({
-				id: 'inspect',
-				label: 'Inspect Element',
-				enabled: isDev,
-				click() {
-					win.inspectElement(props.x, props.y);
-
-					if (webContents(win).isDevToolsOpened()) {
-						webContents(win).devToolsWebContents.focus();
-					}
-				}
-			}),
-			separator: () => ({type: 'separator'}),
 			saveImage: decorateMenuItem({
 				id: 'save',
 				label: 'Save Image',
@@ -128,15 +127,23 @@ const create = (win, options) => {
 					});
 				}
 			}),
-			lookUpSelection: decorateMenuItem({
-				id: 'lookUpWord',
-				label: `Look Up “${cliTruncate(props.selectionText.trim(), 25)}”`,
-				visible: process.platform === 'darwin' && hasText,
+			inspect: () => ({
+				id: 'inspect',
+				label: 'Inspect Element',
+				enabled: isDev,
 				click() {
-					if (process.platform === 'darwin') {
-						webContents(win).showDefinitionForSelection();
+					win.inspectElement(props.x, props.y);
+
+					if (webContents(win).isDevToolsOpened()) {
+						webContents(win).devToolsWebContents.focus();
 					}
 				}
+			}),
+			services: () => ({
+				id: 'services',
+				label: 'Services',
+				role: 'services',
+				visible: process.platform === 'darwin' && (props.isEditable || hasText)
 			})
 		};
 
@@ -155,6 +162,7 @@ const create = (win, options) => {
 			defaultActions.copyLink(),
 			defaultActions.separator(),
 			options.showInspectElement && defaultActions.inspect(),
+			options.showServices && defaultActions.services(),
 			defaultActions.separator()
 		];
 
@@ -182,17 +190,21 @@ const create = (win, options) => {
 		// TODO: https://github.com/electron/electron/issues/5869
 		menuTemplate = removeUnusedMenuItems(menuTemplate);
 
-		// Apply custom labels for default menu items
-		if (options.labels) {
-			let {labels} = options;
-			if (typeof options.labels === 'function') {
-				labels = options.labels(event, props);
+		let {labels} = options;
+		if (typeof options.labels === 'function') {
+			labels = options.labels(event, props);
+		}
+
+		for (const menuItem of menuTemplate) {
+			// Apply custom labels for default menu items
+			if (labels && labels[menuItem.id]) {
+				menuItem.label = labels[menuItem.id];
 			}
 
-			for (const menuItem of menuTemplate) {
-				if (labels[menuItem.id]) {
-					menuItem.label = labels[menuItem.id];
-				}
+			// Replace placeholders in menu item labels
+			if (typeof menuItem.label === 'string' && menuItem.label.includes('{selection}')) {
+				const selectionString = typeof props.selectionText === 'string' ? props.selectionText.trim() : '';
+				menuItem.label = menuItem.label.replace('{selection}', cliTruncate(selectionString, 25));
 			}
 		}
 
